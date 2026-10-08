@@ -10,7 +10,7 @@
 // Modulo puro (sem Phaser): roda no navegador e nos testes (node --test).
 import { game } from "../config/index.js";
 
-/** Profundidade de quem fica em pe no campo (personagens, bloco); o chao fica abaixo disso. */
+/** Profundidade de quem fica em pe no campo (personagens, blocos); o chao fica abaixo disso. */
 export const STANDING_DEPTH = 11;
 /** x + y por unidade de profundidade: o campo inteiro cabe numa fracao (< 1) acima de STANDING_DEPTH. */
 const DEPTH_DIVISOR = 10000;

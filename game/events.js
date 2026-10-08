@@ -1,5 +1,5 @@
 // Barramento de eventos minimo entre a cena Phaser e o HUD (DOM).
-// Eventos (quem emite): "crew" (cena: personagens), "world" (cena: estado do bloco), "chat:open"
+// Eventos (quem emite): "crew" (cena: personagens), "world" (cena: blocos e tarefas), "chat:open"
 // (cena: clique num personagem), "character:thinking" / "character:reply" / "order:start" (HUD).
 
 const target = new EventTarget();

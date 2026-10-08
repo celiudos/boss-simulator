@@ -1,16 +1,19 @@
 // Cena principal: o campo verde numa visao isometrica de jogo de estrategia, uma plataforma com
 // grade dividida em 4 quadrantes (A no topo, B a direita, C a esquerda e D embaixo).
-// Toda a logica usa px do CHAO (game/field.js, NavGrid, World); so o desenho projeta (game/iso.js).
+// Toda a logica usa px do CHAO (game/field.js, game/layout.js, NavGrid, World); so o desenho
+// projeta (game/iso.js).
 // O chefe (jogador) nao tem sprite: ele clica num personagem (ou na pill do topo) para abrir o chat.
 // Cada personagem passeia sozinho dentro do proprio quadrante (game/Walker.js). Quando o chefe
-// convence alguem a levar o bloco para outro quadrante, a cena executa a entrega (deliverBlock).
+// convence alguem a fazer uma tarefa com os blocos (levar, empilhar, torre, parede), a cena executa
+// a tarefa, uma viagem por bloco (runOrder). Varios personagens podem trabalhar ao mesmo tempo.
 // A cena e o HUD (DOM) se comunicam pelo barramento game/events.js:
 //   emite  "crew"               lista dos personagens para a barra do topo
 //   emite  "chat:open"          { characterId } quando o jogador clica num personagem
-//   emite  "world"              estado do bloco (World.snapshot) a cada mudanca
+//   emite  "world"              estado dos blocos e das tarefas (World.snapshot) a cada mudanca
 //   escuta "character:thinking" { id, thinking }  emote "..." enquanto o modelo responde
 //   escuta "character:reply"    { id, text }      balao de fala
-//   escuta "order:start"        { id, destination }  o personagem leva o bloco
+//   escuta "order:start"        { id, order }     o personagem executa a tarefa
+//                               (order = { action, quantity, origin, destination })
 import { game, characters, spriteKey, spriteSheets } from "../config/index.js";
 import {
   BODY_SIZE_RATIO_H,
@@ -27,12 +30,12 @@ import { CameraController } from "./CameraController.js";
 import { NavGrid } from "./NavGrid.js";
 import { Walker } from "./Walker.js";
 import { gameEvents } from "./events.js";
-import { inset, quadrantOf, quadrants } from "./field.js";
+import { inset, quadrants } from "./field.js";
 import { gridCells, gridSegments, platformFaces, quadrantSegments, rectToScreen, screenBounds, toScreen } from "./iso.js";
+import { cellCenter } from "./layout.js";
 import { World } from "./world.js";
 
 const color = (hex) => Phaser.Display.Color.HexStringToColor(hex).color;
-const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
 
 export default class FieldScene extends Phaser.Scene {
   constructor() {
@@ -99,27 +102,32 @@ export default class FieldScene extends Phaser.Scene {
     });
     gameEvents.emit("crew", crew);
 
-    // O bloco comeca no centro do quadrante inicial (no chao).
+    // Os blocos comecam soltos no quadrante inicial (no chao), um por casa (game/layout.js).
     this.world = new World();
-    const blockStart = this.quadrants.get(this.world.blockQuadrant).center;
-    this.block = new Block(this, blockStart.x, blockStart.y);
+    /** id do bloco no World -> Block (desenho). */
+    this.blocks = new Map(
+      this.world.blocks.map((b) => {
+        const p = cellCenter(b);
+        return [b.id, new Block(this, b.id, p.x, p.y, b.level)];
+      }),
+    );
     this.emitWorld();
 
-    // `?debug` na URL: __SCENE__ no console (ex.: __SCENE__.deliverBlock("juca", "A")).
+    // `?debug` na URL: __SCENE__ no console (ex.: __SCENE__.runOrder("juca", { action: "torre", quantity: 5, destination: "A" })).
     if (new URLSearchParams(location.search).has("debug")) globalThis.__SCENE__ = this;
 
     const unsubscribe = [
       gameEvents.on("character:thinking", ({ id, thinking }) => this.onThinking(id, thinking)),
       gameEvents.on("character:reply", ({ id, text }) => this.onReply(id, text)),
-      gameEvents.on("order:start", ({ id, destination }) => {
-        this.deliverBlock(id, destination).catch((err) => console.error("[deliverBlock]", err));
+      gameEvents.on("order:start", ({ id, order }) => {
+        this.runOrder(id, order).catch((err) => console.error("[runOrder]", err));
       }),
     ];
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.closing = true;
       unsubscribe.forEach((off) => off());
       this.walkers.forEach((w) => w.destroy());
-      this.block.destroy();
+      this.blocks.forEach((b) => b.destroy());
     });
   }
 
@@ -181,7 +189,10 @@ export default class FieldScene extends Phaser.Scene {
     return this.walkers.find((w) => w.character.id === id);
   }
 
-  /** Onde os outros estao (e para onde vao): ninguem escolhe o mesmo lugar para parar. */
+  /**
+   * Onde os outros estao (e para onde vao) e onde ha blocos: ninguem escolhe o mesmo lugar para
+   * parar, nem para dentro de uma torre ou parede (os blocos nao bloqueiam a caminhada).
+   */
   crowdExcept(self) {
     const points = [];
     for (const w of this.walkers) {
@@ -189,6 +200,7 @@ export default class FieldScene extends Phaser.Scene {
       points.push(w.feet);
       if (w.target) points.push(w.target);
     }
+    for (const b of this.blocks?.values() ?? []) if (!b.carrier) points.push(b.position);
     return points;
   }
 
@@ -226,73 +238,99 @@ export default class FieldScene extends Phaser.Scene {
     }
   }
 
-  // ── Entrega do bloco ─────────────────────────────────────
+  // ── Tarefas com os blocos ────────────────────────────────
   /**
-   * `characterId` leva o bloco para o quadrante `destination`: anda ate o bloco, pega, carrega ate o
-   * centro do destino, solta e volta para casa. A ordem passa por World.startDelivery (game/orders.js);
-   * se for impossivel, nada acontece. Resolve com { ok: true } ao fim, ou { ok: false, reason }.
+   * `characterId` executa a tarefa `order` = { action, quantity, origin, destination } (ver
+   * game/layout.js): uma viagem por bloco (anda ate o bloco, pega, leva ate a casa planejada e
+   * coloca no chao ou no alto da pilha) e, no fim, volta para o seu quadrante. A ordem passa por
+   * World.startJob (game/orders.js); se for impossivel, nada acontece.
+   * Resolve com { ok: true, entry } ao fim (entry = registro do historico), ou { ok: false, reason }.
    */
-  async deliverBlock(characterId, destination) {
+  async runOrder(characterId, order) {
     const walker = this.walkerById(characterId);
     if (!walker) return { ok: false, reason: "Esse personagem não existe." };
-    const started = this.world.startDelivery(characterId, destination);
+    const started = this.world.startJob(characterId, order);
     if (!started.ok) return started;
     this.emitWorld();
 
     walker.engage();
     walker.setStatus("working");
-    const delivered = await this.carryBlock(walker, destination);
-    if (this.closing) return { ok: false, reason: "O jogo foi encerrado." };
+    let interrupted = false;
+    for (;;) {
+      const trip = this.world.beginTrip(characterId, walker.feet);
+      if (!trip) break;
+      this.emitWorld();
+      const done = await this.runTrip(walker, trip);
+      if (this.closing) return { ok: false, reason: "O jogo foi encerrado." };
+      if (!done) {
+        interrupted = true;
+        break;
+      }
+      this.emitWorld();
+    }
 
-    if (delivered) this.world.finishDelivery();
-    else this.dropBlockHere(walker);
+    const entry = interrupted ? this.dropBlockHere(walker) : this.world.finishJob(characterId);
     this.emitWorld();
 
-    // De volta para casa; so passeia de novo quando chegar (ou se nao der para andar).
-    await walker.walkTo(walker.homeSpot);
-    if (this.closing) return { ok: delivered };
+    // De volta para o quadrante de casa (num lugar sem blocos); so passeia de novo quando chegar.
+    await walker.walkTo(walker.pickWanderTarget() ?? walker.homeSpot);
+    if (this.closing) return { ok: false, reason: "O jogo foi encerrado." };
     walker.startWandering();
-    return delivered ? { ok: true } : { ok: false, reason: "Não deu para levar o bloco." };
+    return entry.reason ? { ok: false, reason: entry.reason, entry } : { ok: true, entry };
   }
 
-  /** Anda ate o bloco, pega, leva ate o centro do destino e solta. true se chegou ao fim. */
-  async carryBlock(walker, destination) {
+  /** Atalho para o console (?debug): leva `quantity` blocos para `destination`. */
+  deliverBlock(characterId, destination, quantity = 1) {
+    return this.runOrder(characterId, { action: "levar_bloco", quantity, destination });
+  }
+
+  /**
+   * Uma viagem: anda ate o bloco, pega, leva ate a casa `trip.to` e coloca no nivel certo da pilha.
+   * true se chegou ao fim.
+   */
+  async runTrip(walker, trip) {
+    const id = walker.character.id;
     const { standOffset } = game.block;
     // Os pes ficam na frente do bloco (a esquerda na tela), para o personagem nao ficar escondido.
     const beside = (p) => this.grid.nearestWalkable(p.x + standOffset.x, p.y + standOffset.y);
-    const target = this.quadrants.get(destination).center;
-    const at = this.block.position;
+    const block = this.blocks.get(trip.blockId);
+    const at = block.position;
 
     const pickup = beside(at);
     if (!pickup || !(await walker.walkTo(pickup)) || this.closing) return false;
     walker.faceTo(at.x, at.y);
-    await this.block.attachTo(walker);
+    if (!this.world.pickUp(id)) return false;
+    this.emitWorld();
+    await block.attachTo(walker);
     if (this.closing) return false;
 
+    const target = cellCenter(trip.to);
     const drop = beside(target);
     if (!drop || !(await walker.walkTo(drop, { speed: game.crew.carrySpeed })) || this.closing) return false;
     walker.faceTo(target.x, target.y);
-    await this.block.dropAt(target.x, target.y);
+    const placed = this.world.place(id);
+    if (!placed) return false;
+    await block.placeAt(target.x, target.y, placed.level);
     return !this.closing;
   }
 
-  /** Entrega interrompida: se o bloco estava na mao, cai na frente do personagem (dentro do campo). */
+  /**
+   * Tarefa interrompida: se havia um bloco na mao, ele cai na casa livre mais perto da frente do
+   * personagem. Encerra a tarefa no World e devolve o registro do historico.
+   */
   dropBlockHere(walker) {
-    let where = null;
-    if (this.block.carrier === walker) {
-      const { x: fx, y: fy, width, height } = game.field;
-      const { standOffset } = game.block;
-      const feet = walker.feet;
-      const x = clamp(feet.x - standOffset.x, fx, fx + width);
-      const y = clamp(feet.y - standOffset.y, fy, fy + height);
-      where = quadrantOf(x, y, game.field);
-      this.block.dropAt(x, y);
+    const { standOffset } = game.block;
+    const feet = walker.feet;
+    const { dropped, entry } = this.world.abortJob(walker.character.id, { x: feet.x - standOffset.x, y: feet.y - standOffset.y });
+    if (dropped) {
+      const p = cellCenter(dropped);
+      this.blocks.get(dropped.blockId)?.placeAt(p.x, p.y, dropped.level);
     }
-    this.world.abortDelivery(where);
+    return entry;
   }
 
   update() {
     this.walkers.forEach((w) => w.update());
-    this.block.update();
+    this.blocks.forEach((b) => b.update());
   }
 }

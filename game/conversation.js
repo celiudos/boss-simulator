@@ -1,9 +1,10 @@
 // Conversa do chefe com os personagens usando o modelo local do Ollama.
 // Cada personagem tem a propria persona (system prompt, ver /personas e game/prompt.js) e o proprio historico.
 //
-// O modelo responde { aceitou, acao, destino, fala }. Quem decide se aceita e o modelo; o codigo so
-// confere se a ordem e possivel no estado atual do campo (game/orders.js -> resolveReply). O que
-// aparece no historico e o resultado REAL: ordem executada ou "Pedido nao executado: <motivo>".
+// O modelo responde { aceitou, acao, quantidade, origem, destino, fala }. Quem decide se aceita e o
+// modelo; o codigo so confere se a tarefa e possivel no estado atual do campo (game/orders.js ->
+// resolveReply). O que aparece no historico e o resultado REAL: ordem executada ou
+// "Pedido nao executado: <motivo>".
 import { game } from "../config/index.js";
 import { chatStream } from "./ollama.js";
 import { resolveReply } from "./orders.js";
@@ -20,7 +21,7 @@ export class Conversation {
     /**
      * Historico exibido no chat:
      *  - { role: "user", text }
-     *  - { role: "assistant", text, order }  order = { action, destination } se a ordem foi executada
+     *  - { role: "assistant", text, order }  order = { action, quantity, origin, destination } se a ordem foi executada
      *  - { role: "system", kind: "order" | "rejected", text }  avisos do jogo (nao vao para o modelo)
      */
     this.entries = [];
@@ -42,7 +43,7 @@ export class Conversation {
   /**
    * Envia a fala do chefe (ate maxQuestionChars) e devolve a resposta do personagem:
    * { text, order, rejected, stats }
-   *  - order: { action, destination } se o personagem aceitou e a ordem e possivel (o HUD a executa)
+   *  - order: { action, quantity, origin, destination } se o personagem aceitou e a tarefa e possivel (o HUD a executa)
    *  - rejected: { reason } se ele aceitou mas a ordem e impossivel agora
    * `onText` recebe a resposta parcial. `getWorld()` devolve o estado do campo (World.snapshot): e
    * lido antes de perguntar (nota do jogo) e de novo ao receber a resposta (validacao).

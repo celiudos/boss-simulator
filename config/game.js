@@ -101,7 +101,7 @@ export const game = {
   crew: {
     /** Velocidade (px/s) andando. */
     walkSpeed: 70,
-    /** Velocidade (px/s) carregando o bloco. */
+    /** Velocidade (px/s) carregando um bloco. */
     carrySpeed: 55,
     /** Lado (px) de cada celula da grade de navegacao. */
     navCell: 20,
@@ -118,12 +118,22 @@ export const game = {
     bubbleMaxChars: 200,
   },
 
-  // ── Bloco ───────────────────────────────────────────────
-  // Um cubo no campo. Quando o chefe convence alguem, o personagem leva o bloco ate o centro de
-  // outro quadrante (game/FieldScene.js -> deliverBlock; as regras ficam em game/orders.js).
+  // ── Blocos ──────────────────────────────────────────────
+  // Cubos no campo, que podem ser empilhados. Cada bloco ocupa uma "casa" (celula de `cell` px do
+  // chao) e um nivel da pilha dessa casa (game/layout.js). Quando o chefe convence alguem, o
+  // personagem leva, empilha ou monta uma torre/parede com os blocos, uma viagem por bloco
+  // (game/FieldScene.js -> runOrder; as regras ficam em game/orders.js e game/layout.js).
   block: {
-    /** Quadrante onde o bloco comeca (um que nao seja a casa de ninguem). */
+    /** Quantos blocos ha no campo. */
+    count: 10,
+    /** Quadrante onde os blocos comecam, soltos (um que nao seja a casa de ninguem). */
     start: "D",
+    /** Lado (px do chao) de cada casa onde um bloco pode ficar; = size: vizinhos encostam (paredes). */
+    cell: 32,
+    /** Folga (px do chao) entre as casas usadas e as linhas de cada quadrante. */
+    margin: 32,
+    /** Blocos por fileira numa parede; o que passar disso sobe em novas fileiras. */
+    wallLength: 5,
     /** Lado da base (px logicos do chao) e altura (px de altura z) do cubo. */
     size: 32,
     height: 30,
@@ -160,7 +170,8 @@ export const game = {
      * (scripts/serve.mjs), que repassa as chamadas para o `baseUrl`.
      */
     lanProxyPort: 3005,
-    model: "gemma4:e2b",
+    // model: "gemma4:e2b",
+    model: "gemma4:e4b",
     /**
      * Quantas instancias do modelo usar (cada uma ocupa ~3 GB de VRAM: 6 GB = 2). A 1a e o Ollama
      * padrao (`baseUrl`); as demais sao `ollama serve` extras que o `npm start` sobe nas portas
@@ -204,8 +215,20 @@ export const game = {
     quickReplies: [
       {
         id: "block",
-        label: "Leva o bloco?",
-        text: "Você pode levar o bloco para outro quadrante?",
+        label: "Leva um bloco?",
+        text: "Você pode levar um bloco para outro quadrante?",
+        always: true,
+      },
+      {
+        id: "tower",
+        label: "Monta uma torre?",
+        text: "Você pode empilhar os blocos e montar uma torre?",
+        always: true,
+      },
+      {
+        id: "wall",
+        label: "Faz uma parede?",
+        text: "Você pode montar uma parede com os blocos?",
         always: true,
       },
       {

@@ -9,7 +9,11 @@ import { FRAME_HEIGHT, FRAME_WIDTH, PORTRAIT_FRAME_INDEX, SHEET_COLUMNS } from "
 import { gameEvents } from "./events.js";
 import { conversationFor } from "./conversation.js";
 import { baseUrl, checkOllama, viaLanProxy, warmUp } from "./ollama.js";
+import { QUADRANT_IDS } from "./field.js";
+import { summarize } from "./layout.js";
 import { personas } from "./personas.js";
+import { describeResult, describeTask } from "./prompt.js";
+import { World } from "./world.js";
 
 const BGM_SRC = game.audio.bgm;
 const DEFAULT_BGM_VOLUME = game.audio.defaultVolume;
@@ -39,11 +43,11 @@ export const OLLAMA_STATUS = {
 const CHARACTER_STATUS = {
   idle: { cls: "idle", label: "à toa" },
   thinking: { cls: "running", label: "pensando" },
-  carrying: { cls: "done", label: "carregando" },
+  carrying: { cls: "done", label: "trabalhando" },
 };
 
-/** Estado do campo antes da cena avisar (ou sem ela): o bloco no quadrante inicial e ninguem carregando. */
-const EMPTY_WORLD = { blockQuadrant: game.block.start, carrierId: null, destination: null, deliveries: [] };
+/** Estado do campo antes da cena avisar (ou sem ela): os blocos soltos no quadrante inicial e ninguem trabalhando. */
+const EMPTY_WORLD = new World().snapshot();
 
 const SVG_ATTRS =
   'width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"';
@@ -156,27 +160,38 @@ function workersPanel(crew, statusOf) {
   });
 }
 
-/** Painel de ordens: onde esta o bloco agora e o historico das entregas (da mais recente para a mais antiga). */
+/** "A: 0 · B: 0 · C: 3 · D: 7" (com a pilha mais alta quando passa de 1 bloco). */
+function blocksLine(world) {
+  const { quadrants } = summarize(world);
+  return QUADRANT_IDS.map((id) => {
+    const { count, tallest } = quadrants[id];
+    return tallest > 1 ? `${id}: ${count} (pilha ${tallest})` : `${id}: ${count}`;
+  }).join(" · ");
+}
+
+/**
+ * Painel de ordens: blocos por quadrante, tarefas em andamento e o historico das tarefas encerradas
+ * (da mais recente para a mais antiga).
+ */
 function ordersPanel(world) {
-  const label = (id) => `${id} (${game.field.labels[id]})`;
   const nameOf = (id) => characters.find((c) => c.id === id)?.name ?? id;
-  const now = world.carrierId
-    ? `${nameOf(world.carrierId)} está levando o bloco de ${world.blockQuadrant} para ${world.destination}`
-    : `O bloco está no quadrante ${label(world.blockQuadrant)}`;
-  const history = [...world.deliveries]
-    .reverse()
-    .map(
-      (d) => `
+  const item = (tag, cls, who, text) => `
         <div class="hud-workers__item">
-          <div class="hud-workers__top"><span class="hud-status hud-status--done">feito</span><span>${esc(nameOf(d.characterId))}</span></div>
-          <div class="hud-workers__task">${esc(nameOf(d.characterId))} levou o bloco de ${esc(d.from)} para ${esc(d.to)}</div>
-        </div>`,
-    )
-    .join("");
+          <div class="hud-workers__top"><span class="hud-status hud-status--${cls}">${esc(tag)}</span><span>${esc(nameOf(who))}</span></div>
+          <div class="hud-workers__task">${esc(text)}</div>
+        </div>`;
+  const running = world.jobs.map((j) => item("fazendo", "running", j.characterId, `Vai ${describeTask(j)} (${j.done} de ${j.quantity})`));
+  const history = [...world.history]
+    .reverse()
+    .map((h) => {
+      const text = `${nameOf(h.characterId)} ${describeResult(h)}`;
+      return h.reason ? item("parou", "empty", h.characterId, `${text} (${h.reason})`) : item("feito", "done", h.characterId, text);
+    });
+  const body = [...running, ...history].join("");
   return flyout({
     title: "Ordens",
-    subtitle: now,
-    body: `<div class="hud-workers">${history || '<div class="hud-empty">Nenhuma ordem cumprida ainda. Convença alguém pelo chat!</div>'}</div>`,
+    subtitle: `Blocos: ${blocksLine(world)}`,
+    body: `<div class="hud-workers">${body || '<div class="hud-empty">Nenhuma ordem cumprida ainda. Convença alguém pelo chat!</div>'}</div>`,
   });
 }
 
@@ -241,6 +256,13 @@ function chatBubble(kind, role, text, extra = "") {
   return `<div class="hud-chat__bubble hud-chat__bubble--${kind}"><div class="hud-chat__header"><span class="hud-chat__role">${esc(role)}</span>${extra}</div>${text}</div>`;
 }
 
+/** Etiqueta curta da ordem na fala do personagem: "2 blocos → A", "torre ×5 → B", "parede ×10 → C". */
+const ORDER_TAG = { levar_bloco: null, empilhar: "pilha", torre: "torre", parede: "parede" };
+function orderTag({ action, quantity, destination }) {
+  const what = ORDER_TAG[action] ? `${ORDER_TAG[action]} ×${quantity}` : `${quantity} ${quantity === 1 ? "bloco" : "blocos"}`;
+  return `${what} → ${destination}`;
+}
+
 function chatMessagesHtml(character, streamingText, notice) {
   if (!character) {
     return '<div class="hud-chat__system">Clique em um personagem (no campo ou na barra do topo) para conversar.</div>';
@@ -249,13 +271,13 @@ function chatMessagesHtml(character, streamingText, notice) {
   const name = character.name.toUpperCase();
   const items = [];
   if (!conv.entries.length && streamingText === undefined) {
-    items.push(`<div class="hud-chat__system">Você é o chefe. Converse com ${esc(character.name)} e tente convencer a pessoa a levar o bloco para outro quadrante (A, B, C ou D).</div>`);
+    items.push(`<div class="hud-chat__system">Você é o chefe. Converse com ${esc(character.name)} e tente convencer a pessoa a trabalhar com os blocos: levar para outro quadrante (A, B, C ou D), empilhar ou montar uma torre ou uma parede.</div>`);
   }
   items.push(
     ...conv.entries.map((e) => {
       if (e.role === "user") return chatBubble("user", "VOCE", esc(e.text));
       if (e.role === "system") return `<div class="hud-chat__system hud-chat__system--${e.kind === "order" ? "order" : "error"}">${esc(e.text)}</div>`;
-      const tag = e.order ? `<span class="hud-chat__tag">bloco → ${esc(e.order.destination)}</span>` : "";
+      const tag = e.order ? `<span class="hud-chat__tag">${esc(orderTag(e.order))}</span>` : "";
       return chatBubble("agent", name, esc(e.text), tag);
     }),
   );
@@ -299,13 +321,13 @@ export function initHud() {
     status: new Map(),
     /** Uso de contexto da ultima resposta: { used, total } */
     ctx: null,
-    /** Estado do bloco (evento "world"): { blockQuadrant, carrierId, destination, deliveries }. */
+    /** Estado dos blocos e tarefas (evento "world"): { blocks, jobs, history } (World.snapshot). */
     world: null,
   };
   const statusOf = (id) => {
     const status = state.status.get(id) ?? "idle";
-    // Levando o bloco: o estado vem do campo (evento "world"), nao do chat.
-    return status === "idle" && state.world?.carrierId === id ? "carrying" : status;
+    // Trabalhando com os blocos: o estado vem do campo (evento "world"), nao do chat.
+    return status === "idle" && state.world?.jobs.some((j) => j.characterId === id) ? "carrying" : status;
   };
 
   function setStatus(id, status) {
@@ -361,12 +383,13 @@ export function initHud() {
       : '<span class="topbar-agent-pill__empty">Ninguém no campo</span>';
   }
 
-  /** Texto da pill do bloco: "Bloco: D" ou, durante uma entrega, "Bloco: Juca → A". */
+  /** Texto da pill dos blocos: quantos ha em cada quadrante ("Blocos A0 B0 C3 D7"), mais os carregados. */
   function blockLabel() {
     const w = state.world;
-    if (!w) return "Bloco: --";
-    if (!w.carrierId) return `Bloco: ${w.blockQuadrant}`;
-    return `Bloco: ${byId.get(w.carrierId)?.name ?? w.carrierId} → ${w.destination}`;
+    if (!w) return "Blocos: --";
+    const { quadrants, carried } = summarize(w);
+    const counts = QUADRANT_IDS.map((id) => `${id}${quadrants[id].count}`).join(" ");
+    return `Blocos ${counts}${carried ? ` · ${carried} na mão` : ""}`;
   }
 
   function renderBottom() {
@@ -377,7 +400,7 @@ export function initHud() {
     bottom.innerHTML = `
       <span class="hud-pill hud-pill--connection" title="Ollama"><span class="pixel-dot pixel-dot--${s.dot}"></span><span>${esc(s.label)}</span></span>
       <span class="hud-pill hud-pill--model">${ICON_SPARKLES}<span>${esc(MODEL)}</span></span>
-      <span class="hud-pill hud-pill--metric hud-pill--block" title="Onde está o bloco"><span>${esc(blockLabel())}</span></span>
+      <span class="hud-pill hud-pill--metric hud-pill--block" title="Blocos em cada quadrante"><span>${esc(blockLabel())}</span></span>
       <span class="hud-pill hud-pill--metric"><span>${busy}/${total} busy</span></span>
       <span class="hud-meter-inline" title="Contexto usado na última resposta">
         <span class="hud-meter-inline__label">CTX</span>
@@ -521,8 +544,8 @@ export function initHud() {
       state.streaming.delete(id);
       setStatus(id, "idle");
       gameEvents.emit("character:reply", { id, text });
-      // Ordem aceita e possivel: a cena leva o bloco (e avisa o HUD pelo evento "world").
-      if (order) gameEvents.emit("order:start", { id, destination: order.destination });
+      // Ordem aceita e possivel: a cena executa a tarefa (e avisa o HUD pelo evento "world").
+      if (order) gameEvents.emit("order:start", { id, order });
     } catch (err) {
       console.error("[chat]", err);
       state.streaming.delete(id);

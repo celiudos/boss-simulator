@@ -1,10 +1,11 @@
-// O bloco do campo: um cubo isometrico (topo e duas laterais sombreadas, contorno escuro) com uma
-// sombra no chao. Fica no chao ate alguem o pegar; carregado, acompanha o personagem acima da
-// cabeca. Quem manda ele de um lugar a outro e a cena (FieldScene.deliverBlock); aqui so ficam o
-// desenho e a animacao de pegar e soltar.
+// Um bloco do campo: um cubo isometrico (topo e duas laterais sombreadas, contorno escuro) com uma
+// sombra no chao. Fica numa casa do chao (ou em cima de outro bloco, numa pilha) ate alguem o pegar;
+// carregado, acompanha o personagem acima da cabeca. Quem decide de onde para onde ele vai e a cena
+// (FieldScene.runOrder, com o planejamento de game/layout.js); aqui so ficam o desenho e as
+// animacoes de pegar e colocar.
 //
-// A posicao de verdade e a do centro da base no CHAO (`state` = { x, y, z }, px logicos e altura);
-// a cada frame o cubo e projetado na tela (game/iso.js).
+// A posicao de verdade e a do centro da base no CHAO mais a altura (`state` = { x, y, z }, px
+// logicos); a cada frame o cubo e projetado na tela (game/iso.js).
 import { game } from "../config/index.js";
 import { STANDING_DEPTH, cubeFaces, depthAt, rectToScreen, toScreen } from "./iso.js";
 
@@ -13,22 +14,28 @@ const color = (hex) => Phaser.Display.Color.HexStringToColor(hex).color;
 const SHADOW_DEPTH = STANDING_DEPTH - 1;
 /** Carregado: uma fracao acima do personagem (a profundidade dele varia com a posicao). */
 const ABOVE_CARRIER = 0.00005;
+/**
+ * Cada nivel da pilha fica um tiquinho na frente do de baixo. Menor que a diferenca entre casas
+ * vizinhas (block.cell / 10000 em depthAt), maior que zero: a pilha inteira desenha na ordem certa.
+ */
+const LEVEL_DEPTH = 0.00001;
 
 export class Block {
-  /** (x, y) = centro da base do cubo no chao (px logicos). */
-  constructor(scene, x, y, cfg = game.block) {
+  /** `id` do bloco no World; (x, y) = centro da base no chao (px logicos); `level` = nivel da pilha. */
+  constructor(scene, id, x, y, level = 0, cfg = game.block) {
     this.scene = scene;
+    this.id = id;
     this.cfg = cfg;
     /** Quem esta carregando (Walker) ou null. */
     this.carrier = null;
     /** true quando o bloco ja subiu e acompanha o carregador a cada frame. */
     this.attached = false;
     /** Centro da base no chao e altura (z): e isso que as animacoes mexem. */
-    this.state = { x, y, z: 0 };
-    /** Quem acabou de soltar o bloco (durante a queda) ou null. */
+    this.state = { x, y, z: level * cfg.height };
+    /** Quem acabou de soltar o bloco (durante a descida) ou null. */
     this.dropper = null;
 
-    this.shadow = this.drawShadow(scene).setDepth(SHADOW_DEPTH);
+    this.shadow = this.drawShadow(scene).setDepth(SHADOW_DEPTH).setVisible(level === 0);
     this.cube = this.drawCube(scene);
     this.container = scene.add.container(0, 0, [this.cube]);
     this.update();
@@ -77,19 +84,25 @@ export class Block {
     this.attached = false;
     this.shadow.setVisible(false);
     const { x, y } = walker.feet;
-    await this.tweenTo({ x, y, z: this.cfg.carryHeight }, 180, "Sine.easeOut");
+    const rise = Math.abs(this.cfg.carryHeight - this.state.z);
+    await this.tweenTo({ x, y, z: this.cfg.carryHeight }, 180 + rise, "Sine.easeOut");
     if (this.carrier === walker) this.attached = true;
   }
 
-  /** Solta o bloco no chao em (x, y) (centro da base). */
-  async dropAt(x, y) {
+  /**
+   * Coloca o bloco com a base em (x, y) do chao, no nivel `level` da pilha (0 = no chao).
+   * No chao ele quica; em cima de outro bloco (ou acima da cabeca) desliza ate o lugar.
+   */
+  async placeAt(x, y, level = 0) {
     this.attached = false;
-    // Enquanto cai, continua na frente de quem soltou (senao some atras da cabeca dele).
+    // Enquanto desce, continua na frente de quem soltou (senao some atras da cabeca dele).
     this.dropper = this.carrier;
     this.carrier = null;
-    await this.tweenTo({ x, y, z: 0 }, 240, "Bounce.easeOut");
+    const z = level * this.cfg.height;
+    const travel = Math.abs(this.state.z - z);
+    await this.tweenTo({ x, y, z }, level === 0 ? 240 : 200 + travel, level === 0 ? "Bounce.easeOut" : "Sine.easeInOut");
     this.dropper = null;
-    if (!this.carrier) this.shadow.setVisible(true);
+    if (!this.carrier) this.shadow.setVisible(level === 0);
   }
 
   /** Projeta na tela (chamar a cada frame, depois de atualizar os personagens). */
@@ -105,10 +118,10 @@ export class Block {
     this.container.setPosition(s.x, s.y);
     const ground = toScreen({ x, y });
     this.shadow.setPosition(ground.x, ground.y);
-    // Carregado (ou caindo da mao): logo acima de quem carrega; no chao: pela posicao, como os outros.
+    // Carregado (ou descendo da mao): logo acima de quem carrega; parado: pela posicao e pelo nivel.
+    const own = depthAt(x, y) + (z / this.cfg.height) * LEVEL_DEPTH;
     const holder = this.carrier ?? this.dropper;
-    const depth = holder ? Math.max(holder.sprite.depth, depthAt(x, y)) + ABOVE_CARRIER : depthAt(x, y);
-    this.container.setDepth(depth);
+    this.container.setDepth(holder ? Math.max(holder.sprite.depth + ABOVE_CARRIER, own) : own);
   }
 
   destroy() {

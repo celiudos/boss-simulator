@@ -4,7 +4,7 @@ import { game } from "../config/index.js";
 import { checkOllama } from "./ollama.js";
 import { OLLAMA_STATUS, esc } from "./hud.js";
 
-const TIP = "Clique em um personagem para conversar. Convença-o, pelo chat, a levar o bloco de um quadrante para outro.";
+const TIP = "Clique em um personagem para conversar. Convença-o, pelo chat, a levar, empilhar ou montar uma torre ou parede com os blocos.";
 
 /** Mostra a tela inicial e resolve quando o jogador comeca. */
 export async function runLoading() {
