@@ -48,32 +48,52 @@ export const game = {
     zoomMax: 3,
   },
 
+  // ── Projecao isometrica (visao de jogo de estrategia) ───
+  // A logica (campo, grade de navegacao, ordens) usa px do CHAO (x, y) e altura z; so o desenho
+  // projeta para a tela (game/iso.js):  sx = (x - y)·scale   sy = (x + y)·scale/2 - z·zScale
+  iso: {
+    /** Fator do chao para a tela (~1/sqrt(2): o losango tem a mesma area do campo, 2:1). */
+    scale: 0.7071,
+    /** Quantos px de tela sobe 1 px de altura (z). */
+    zScale: 1,
+    /** Espessura (px de tela) das laterais da plataforma do campo. */
+    thickness: 28,
+  },
+
   // ── Campo (cenario principal) ───────────────────────────
-  // Visto de cima, dividido em 4 quadrantes por linhas brancas:
-  //   A (cima, esquerda)  B (cima, direita)
-  //   C (baixo, esquerda) D (baixo, direita)
-  // Desenhado pelo Phaser (game/FieldScene.js); a geometria fica em game/field.js.
+  // Plataforma isometrica dividida em 4 quadrantes por linhas brancas. No chao (px logicos) a
+  // geometria e um retangulo 2x2 (game/field.js); na tela ele vira um losango:
+  //         A            A = no topo
+  //       C   B          B = à direita
+  //         D            C = à esquerda      D = embaixo
+  // Desenhado pelo Phaser (game/FieldScene.js) com a geometria de game/iso.js.
   field: {
-    /** Canto superior esquerdo e tamanho (px do mundo). Use multiplos de crew.navCell. */
+    /** Canto (x, y) e tamanho no chao (px logicos). Use multiplos de crew.navCell e de gridCell. */
     x: 0,
     y: 0,
     width: 960,
     height: 640,
-    /** Faixas de grama alternadas. */
+    /** Grama em xadrez (celulas da grade alternando as duas cores). */
     grass: ["#4c9a3c", "#459136"],
-    stripeHeight: 64,
+    /** Lado (px logicos) de cada celula da grade desenhada no chao. */
+    gridCell: 64,
+    /** Linhas finas da grade. */
+    gridColor: "#ffffff",
+    gridAlpha: 0.16,
+    /** Laterais da plataforma (terra): esquerda (mais clara) e direita (mais escura). */
+    sideColors: ["#7a5230", "#5b3c22"],
     /** Linhas brancas da borda e das divisoes. */
     lineColor: "#ffffff",
     lineWidth: 4,
-    /** Letras A-D no centro de cada quadrante. */
-    labelSize: 140,
-    labelAlpha: 0.2,
-    /** Nome de cada quadrante, para o texto do chat (ex.: "quadrante A (cima, à esquerda)"). */
+    /** Letras A-D em pe no centro de cada quadrante. */
+    labelSize: 96,
+    labelAlpha: 0.22,
+    /** Onde cada quadrante aparece na tela, para o texto do chat (ex.: "quadrante A (no topo)"). */
     labels: {
-      A: "cima, à esquerda",
-      B: "cima, à direita",
-      C: "baixo, à esquerda",
-      D: "baixo, à direita",
+      A: "no topo",
+      B: "à direita",
+      C: "à esquerda",
+      D: "embaixo",
     },
   },
 
@@ -99,19 +119,26 @@ export const game = {
   },
 
   // ── Bloco ───────────────────────────────────────────────
-  // Um bloco no campo. Quando o chefe convence alguem, o personagem leva o bloco ate o centro de
+  // Um cubo no campo. Quando o chefe convence alguem, o personagem leva o bloco ate o centro de
   // outro quadrante (game/FieldScene.js -> deliverBlock; as regras ficam em game/orders.js).
   block: {
     /** Quadrante onde o bloco comeca (um que nao seja a casa de ninguem). */
     start: "D",
-    /** Lado (px) do quadrado. */
-    size: 28,
-    color: "#e0a030",
+    /** Lado da base (px logicos do chao) e altura (px de altura z) do cubo. */
+    size: 32,
+    height: 30,
+    /** Faces do cubo: topo (iluminado), esquerda e direita (sombra), e o contorno. */
+    topColor: "#f2b84a",
+    leftColor: "#e0a030",
+    rightColor: "#b07a1c",
     borderColor: "#5c3a0e",
-    /** Distancia (px) do centro do personagem ate o centro do bloco quando ele carrega. */
-    carryHeight: 46,
-    /** Distancia (px) entre os pes de quem pega/solta o bloco e o centro dele. */
-    standGap: 36,
+    /** Altura (z) da base do cubo quando carregado: fica acima da cabeca do personagem. */
+    carryHeight: 76,
+    /**
+     * Onde ficam os pes de quem pega/solta o bloco, em relacao ao centro dele (px logicos).
+     * +y no chao = mais para a frente e para a esquerda na tela: o personagem nao fica escondido.
+     */
+    standOffset: { x: 0, y: 40 },
   },
 
   // ── Audio ───────────────────────────────────────────────

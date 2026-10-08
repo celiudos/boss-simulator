@@ -25,7 +25,7 @@ export const REPLY_FORMAT = {
   required: ["aceitou", "acao", "destino", "fala"],
 };
 
-/** "quadrante B (cima, à direita)" */
+/** "quadrante B (à direita)" */
 export function describeQuadrant(id, field = game.field) {
   return `quadrante ${id} (${field.labels[id]})`;
 }
@@ -43,7 +43,7 @@ export function buildSystemPrompt(character, persona) {
     persona.body,
     "",
     "## O campo",
-    `Vocês estão num campo visto de cima, dividido em 4 quadrantes: ${quadrants}. Você mora no ${describeQuadrant(character.home)}.`,
+    `Vocês estão num campo visto do alto, em diagonal, dividido em 4 quadrantes: ${quadrants}. Você mora no ${describeQuadrant(character.home)}.`,
     "Há um bloco no campo. O chefe pode pedir que você leve o bloco para outro quadrante: é a única coisa que você sabe fazer no campo.",
     "",
     "## Como responder",

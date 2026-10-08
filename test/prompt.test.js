@@ -49,14 +49,14 @@ test("formato da resposta: aceitou antes de fala, com enums de acao e destino", 
 test("nota do jogo: bloco parado, carregado por outro e carregado pelo proprio personagem", () => {
   const idle = buildStateNote(world({ blockQuadrant: "D" }), bia);
   assert.match(idle, /^\(Nota do jogo, não é fala do chefe:/);
-  assert.ok(idle.includes("O bloco está no quadrante D (baixo, à direita)"));
+  assert.ok(idle.includes("O bloco está no quadrante D (embaixo)"));
   assert.ok(idle.includes("ninguém o está carregando"));
 
   const other = buildStateNote(world({ carrierId: "juca", destination: "A" }), bia);
-  assert.ok(other.includes("Juca está levando o bloco para o quadrante A (cima, à esquerda)"), other);
+  assert.ok(other.includes("Juca está levando o bloco para o quadrante A (no topo)"), other);
 
   const self = buildStateNote(world({ carrierId: "bia", destination: "C" }), bia);
-  assert.ok(self.includes("Você está levando o bloco para o quadrante C (baixo, à esquerda)"), self);
+  assert.ok(self.includes("Você está levando o bloco para o quadrante C (à esquerda)"), self);
 });
 
 test("buildMessages: system primeiro, fala do chefe citada e respostas no JSON completo", () => {

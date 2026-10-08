@@ -1,7 +1,7 @@
-// Geometria do campo: quatro quadrantes (config/game.js -> field).
+// Geometria do campo no CHAO (px logicos): quatro quadrantes (config/game.js -> field).
 //
-//   A | B      A = cima, esquerda    B = cima, direita
-//   --+--      C = baixo, esquerda   D = baixo, direita
+//   A | B      No chao o campo e um retangulo 2x2. Na tela (projecao isometrica, game/iso.js)
+//   --+--      ele vira um losango: A no topo, B a direita, C a esquerda e D embaixo.
 //   C | D
 //
 // Modulo puro (sem Phaser): roda no navegador e nos testes (node --test).
@@ -14,7 +14,7 @@ const POSITION = { A: [0, 0], B: [1, 0], C: [0, 1], D: [1, 1] };
 
 /**
  * Os quatro quadrantes: [{ id, label, col, row, x, y, width, height, center }], em px do mundo.
- * `label` descreve a posicao ("cima, à esquerda").
+ * `label` descreve onde ele aparece na tela ("no topo").
  */
 export function quadrants(field = game.field) {
   const width = field.width / 2;

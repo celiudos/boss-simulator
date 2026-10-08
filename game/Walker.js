@@ -1,22 +1,26 @@
 // Personagem em pe que anda sozinho pelo campo: grade de navegacao com A* (game/NavGrid.js), passeia
 // so dentro do quadrante de casa e mostra baloes com as falas.
 // Reaproveita o Worker (nome, ponto de status, emotes e balao).
+//
+// A posicao de verdade e a dos PES no chao (`pos`, px logicos, as mesmas coordenadas da grade);
+// a caminhada anima `pos` e, a cada frame, o sprite e projetado na tela (game/iso.js).
 import { BODY_OFFSET_RATIO_Y, BODY_SIZE_RATIO_H, FRAME_HEIGHT } from "./constants.js";
 import { ChatBubble } from "./ChatBubble.js";
 import { Worker } from "./Worker.js";
+import { depthAt, screenDir, toScreen } from "./iso.js";
 
-/** Do centro do sprite ate o centro do corpo fisico (os pes): a grade de navegacao usa os pes. */
+/** Do centro do sprite ate o centro do corpo fisico (os pes), em px de tela. */
 export const FEET_OFFSET_Y = FRAME_HEIGHT * (BODY_OFFSET_RATIO_Y + BODY_SIZE_RATIO_H / 2) - FRAME_HEIGHT / 2;
 
-/** Acima do campo; a fracao ordena pelo y (quem esta mais embaixo fica na frente). */
-export const STANDING_DEPTH = 11;
-export const depthFor = (y) => STANDING_DEPTH + y / 10000;
-
-/** Direcao dominante de um deslocamento. */
-export const dirOf = (dx, dy) => (Math.abs(dx) > Math.abs(dy) ? (dx < 0 ? "left" : "right") : dy < 0 ? "up" : "down");
+/** Centro do sprite (tela) de quem tem os pes em (x, y) do chao. */
+const spriteAt = (x, y) => {
+  const s = toScreen({ x, y });
+  return { x: s.x, y: s.y - FEET_OFFSET_Y };
+};
 
 export class Walker extends Worker {
   /**
+   * (x, y) = pes no chao (px logicos).
    * @param {object} opts
    * @param {import("./NavGrid.js").NavGrid} opts.grid
    * @param {{x:number,y:number,width:number,height:number}} opts.home  area (pes) onde passeia
@@ -24,7 +28,10 @@ export class Walker extends Worker {
    * @param {object} opts.config  config/game.js -> crew
    */
   constructor(scene, x, y, spriteKey, character, facing, { grid, home, crowd, config }) {
-    super(scene, x, y, spriteKey, character, facing);
+    const s = spriteAt(x, y);
+    super(scene, s.x, s.y, spriteKey, character, facing);
+    /** Pes no chao (px logicos): e isso que a caminhada anima. */
+    this.pos = { x, y };
     this.grid = grid;
     this.home = home;
     this.crowd = crowd;
@@ -39,15 +46,15 @@ export class Walker extends Worker {
     this.wanderTimer = null;
     this.destroyed = false;
 
-    this.sprite.setDepth(depthFor(y));
+    this.sprite.setDepth(depthAt(x, y));
     // Balao um pouco mais estreito que o padrao.
     this.bubble.destroy();
     this.bubble = new ChatBubble(scene, { maxWidth: 250 });
   }
 
-  /** Posicao dos pes (coordenadas da grade de navegacao). */
+  /** Posicao dos pes no chao (coordenadas da grade de navegacao). */
   get feet() {
-    return { x: this.sprite.x, y: this.sprite.y + FEET_OFFSET_Y };
+    return { x: this.pos.x, y: this.pos.y };
   }
 
   playIdle() {
@@ -59,13 +66,15 @@ export class Walker extends Worker {
     if (!this.moving) this.playIdle();
   }
 
+  /** Vira para o ponto (x, y) do chao. */
   faceTo(x, y) {
-    this.face(dirOf(x - this.sprite.x, y - this.sprite.y));
+    if (x === this.pos.x && y === this.pos.y) return;
+    this.face(screenDir(x - this.pos.x, y - this.pos.y));
   }
 
   /**
-   * Anda ate `to` (pes) pela grade. Resolve true ao chegar, false se nao houver caminho ou se a
-   * caminhada for interrompida. `exact`: termina exatamente em `to`, mesmo fora da grade.
+   * Anda ate `to` (pes, no chao) pela grade. Resolve true ao chegar, false se nao houver caminho ou
+   * se a caminhada for interrompida. `exact`: termina exatamente em `to`, mesmo fora da grade.
    */
   walkTo(to, { speed = this.cfg.walkSpeed, exact = false } = {}) {
     this.stopWalking();
@@ -90,16 +99,15 @@ export class Walker extends Worker {
       const step = (i) => {
         if (id !== this.walkId || this.destroyed) return;
         if (i >= path.length) return finish(true);
-        const tx = path[i].x;
-        const ty = path[i].y - FEET_OFFSET_Y;
-        const dx = tx - this.sprite.x;
-        const dy = ty - this.sprite.y;
+        const { x: tx, y: ty } = path[i];
+        const dx = tx - this.pos.x;
+        const dy = ty - this.pos.y;
         const dist = Math.hypot(dx, dy);
         if (dist < 1) return step(i + 1);
-        this.facing = dirOf(dx, dy);
+        this.facing = screenDir(dx, dy);
         this.sprite.anims.play(`${this.spriteKey}:walk-${this.facing}`, true);
         this.scene.tweens.add({
-          targets: this.sprite,
+          targets: this.pos,
           x: tx,
           y: ty,
           duration: (dist / speed) * 1000,
@@ -113,7 +121,7 @@ export class Walker extends Worker {
   /** Para onde estiver (a promessa da caminhada resolve false). */
   stopWalking() {
     this.walkId++;
-    this.scene.tweens.killTweensOf(this.sprite);
+    this.scene.tweens.killTweensOf(this.pos);
     const done = this.walkDone;
     this.walkDone = null;
     this.target = null;
@@ -186,9 +194,12 @@ export class Walker extends Worker {
     super.nextActivity();
   }
 
+  /** Projeta os pes na tela (sprite e profundidade) e atualiza nome, emote e balao. */
   update() {
+    const s = spriteAt(this.pos.x, this.pos.y);
+    this.sprite.setPosition(s.x, s.y);
+    this.sprite.setDepth(depthAt(this.pos.x, this.pos.y));
     super.update();
-    this.sprite.setDepth(depthFor(this.sprite.y));
   }
 
   destroy() {

@@ -18,11 +18,13 @@ Leia o `README.md` para entender o projeto.
 - Removidos o escritório (mapa Tiled, tilesets, portas, "Press E"), os dois modos antigos e as personas antigas.
 - Testes unitários (`npm test`) para campo, grade de navegação, mundo/ordens, prompt e personas.
 
+Altere a perspectiva de visão do jogo para um mapa 3d, com o ângulo de visão parecido com jogos de estratégia (ex: Age of Empires, Warcraft 3, Starcraft 2). O mapa deve estar delimitado por uma grade 3D, e os personagens devem se movimentar dentro dessa grade.
+Deixe o bloco com uma aparência 3D
+
 # Instrução
 
-Os códigos atuais deste repositório eram referentes a um jogo anterior chamado `chamar-para-tomar-cafe-simulator`.
-Leia o `CLAUDE.md` para entender este repositório.
+Adicione mais blocos ao jogo. Deixe 10.
+Os blocos podem ser empilhados.
 
-Aproveite todo o código existente, mas adapte-o para o novo jogo `boss-simulator`.
-
-Apague o que for necessário, mas não apague nada que seja útil para o novo jogo.
+O jogador pode pedir para os personagens empilharem os blocos.
+O Jogador pode pedir para que formem alguma estrutura com os blocos, como uma torre ou uma parede.

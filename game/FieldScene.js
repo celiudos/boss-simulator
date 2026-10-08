@@ -1,4 +1,6 @@
-// Cena principal: o campo verde visto de cima, dividido em 4 quadrantes (A, B, C e D).
+// Cena principal: o campo verde numa visao isometrica de jogo de estrategia, uma plataforma com
+// grade dividida em 4 quadrantes (A no topo, B a direita, C a esquerda e D embaixo).
+// Toda a logica usa px do CHAO (game/field.js, NavGrid, World); so o desenho projeta (game/iso.js).
 // O chefe (jogador) nao tem sprite: ele clica num personagem (ou na pill do topo) para abrir o chat.
 // Cada personagem passeia sozinho dentro do proprio quadrante (game/Walker.js). Quando o chefe
 // convence alguem a levar o bloco para outro quadrante, a cena executa a entrega (deliverBlock).
@@ -23,12 +25,14 @@ import {
 import { Block } from "./Block.js";
 import { CameraController } from "./CameraController.js";
 import { NavGrid } from "./NavGrid.js";
-import { FEET_OFFSET_Y, Walker } from "./Walker.js";
+import { Walker } from "./Walker.js";
 import { gameEvents } from "./events.js";
 import { inset, quadrantOf, quadrants } from "./field.js";
+import { gridCells, gridSegments, platformFaces, quadrantSegments, rectToScreen, screenBounds, toScreen } from "./iso.js";
 import { World } from "./world.js";
 
 const color = (hex) => Phaser.Display.Color.HexStringToColor(hex).color;
+const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
 
 export default class FieldScene extends Phaser.Scene {
   constructor() {
@@ -48,11 +52,13 @@ export default class FieldScene extends Phaser.Scene {
 
   create() {
     const field = game.field;
+    /** Area do chao (px logicos): onde da para andar. */
     const bounds = { x: field.x, y: field.y, width: field.width, height: field.height };
     this.quadrants = new Map(quadrants(field).map((q) => [q.id, q]));
     this.drawField(field);
 
-    this.cameraController = new CameraController(this, bounds);
+    // A camera enquadra o losango projetado na tela (com as laterais da plataforma).
+    this.cameraController = new CameraController(this, screenBounds(field));
     this.cameraController.init();
 
     // Grade de navegacao: campo livre (sem obstaculos), corpo do tamanho dos pes do personagem.
@@ -66,7 +72,7 @@ export default class FieldScene extends Phaser.Scene {
     const crew = characters.map((c, i) => {
       const home = this.quadrants.get(c.home);
       const start = this.grid.nearestWalkable(home.center.x, home.center.y) ?? home.center;
-      const walker = new Walker(this, start.x, start.y - FEET_OFFSET_Y, spriteKey(c.sprite), c, "down", {
+      const walker = new Walker(this, start.x, start.y, spriteKey(c.sprite), c, "down", {
         grid: this.grid,
         home: inset(home, game.crew.homeInset),
         config: game.crew,
@@ -93,7 +99,7 @@ export default class FieldScene extends Phaser.Scene {
     });
     gameEvents.emit("crew", crew);
 
-    // O bloco comeca no centro do quadrante inicial.
+    // O bloco comeca no centro do quadrante inicial (no chao).
     this.world = new World();
     const blockStart = this.quadrants.get(this.world.blockQuadrant).center;
     this.block = new Block(this, blockStart.x, blockStart.y);
@@ -117,25 +123,50 @@ export default class FieldScene extends Phaser.Scene {
     });
   }
 
-  /** Grama em faixas, borda e divisoes brancas, e a letra de cada quadrante. */
+  /**
+   * Plataforma isometrica: laterais de terra, grama em xadrez, grade fina, borda e divisoes brancas
+   * e a letra de cada quadrante em pe. Tudo na profundidade 0-1 (abaixo de quem fica em pe).
+   */
   drawField(field) {
     const g = this.add.graphics().setDepth(0);
-    const stripes = field.grass.map(color);
-    for (let y = 0, i = 0; y < field.height; y += field.stripeHeight, i++) {
-      g.fillStyle(stripes[i % stripes.length], 1);
-      g.fillRect(field.x, field.y + y, field.width, Math.min(field.stripeHeight, field.height - y));
+    const line = ({ from, to }) => {
+      const a = toScreen(from);
+      const b = toScreen(to);
+      g.lineBetween(a.x, a.y, b.x, b.y);
+    };
+
+    // Laterais da frente (esquerda mais clara, direita mais escura), com a aresta de baixo marcada.
+    const sides = field.sideColors.map(color);
+    for (const face of platformFaces(field)) {
+      g.fillStyle(face.side === "left" ? sides[0] : sides[1], 1);
+      g.fillPoints(face.points, true);
+      g.lineStyle(2, 0x000000, 0.35);
+      g.lineBetween(face.points[2].x, face.points[2].y, face.points[3].x, face.points[3].y);
     }
 
-    const midX = field.x + field.width / 2;
-    const midY = field.y + field.height / 2;
+    // Grama: o losango inteiro na 1a cor (sem frestas entre celulas) e o xadrez por cima.
+    const grass = field.grass.map(color);
+    g.fillStyle(grass[0], 1);
+    g.fillPoints(rectToScreen(field), true);
+    for (const cell of gridCells(field)) {
+      const tone = (cell.col + cell.row) % grass.length;
+      if (tone === 0) continue;
+      g.fillStyle(grass[tone], 1);
+      g.fillPoints(rectToScreen(cell), true);
+    }
+
+    // Grade fina das celulas.
+    g.lineStyle(1, color(field.gridColor), field.gridAlpha);
+    gridSegments(field).forEach(line);
+
+    // Borda e divisoes dos quadrantes.
     g.lineStyle(field.lineWidth, color(field.lineColor), 1);
-    g.strokeRect(field.x, field.y, field.width, field.height);
-    g.lineBetween(midX, field.y, midX, field.y + field.height);
-    g.lineBetween(field.x, midY, field.x + field.width, midY);
+    quadrantSegments(field).forEach(line);
 
     for (const q of this.quadrants.values()) {
+      const at = toScreen(q.center);
       this.add
-        .text(q.center.x, q.center.y, q.id, {
+        .text(at.x, at.y, q.id, {
           fontFamily: '"Press Start 2P", monospace',
           fontSize: `${field.labelSize}px`,
           color: field.lineColor,
@@ -226,9 +257,9 @@ export default class FieldScene extends Phaser.Scene {
 
   /** Anda ate o bloco, pega, leva ate o centro do destino e solta. true se chegou ao fim. */
   async carryBlock(walker, destination) {
-    const { standGap, size } = game.block;
-    // Os pes ficam do lado esquerdo do bloco, na altura da base dele.
-    const beside = (p) => this.grid.nearestWalkable(p.x - standGap, p.y + size / 2);
+    const { standOffset } = game.block;
+    // Os pes ficam na frente do bloco (a esquerda na tela), para o personagem nao ficar escondido.
+    const beside = (p) => this.grid.nearestWalkable(p.x + standOffset.x, p.y + standOffset.y);
     const target = this.quadrants.get(destination).center;
     const at = this.block.position;
 
@@ -245,13 +276,17 @@ export default class FieldScene extends Phaser.Scene {
     return !this.closing;
   }
 
-  /** Entrega interrompida: se o bloco estava na mao, cai onde o personagem esta. */
+  /** Entrega interrompida: se o bloco estava na mao, cai na frente do personagem (dentro do campo). */
   dropBlockHere(walker) {
     let where = null;
     if (this.block.carrier === walker) {
+      const { x: fx, y: fy, width, height } = game.field;
+      const { standOffset } = game.block;
       const feet = walker.feet;
-      where = quadrantOf(feet.x, feet.y, game.field);
-      this.block.dropAt(feet.x, feet.y - game.block.size / 2);
+      const x = clamp(feet.x - standOffset.x, fx, fx + width);
+      const y = clamp(feet.y - standOffset.y, fy, fy + height);
+      where = quadrantOf(x, y, game.field);
+      this.block.dropAt(x, y);
     }
     this.world.abortDelivery(where);
   }

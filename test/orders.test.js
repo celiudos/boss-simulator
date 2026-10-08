@@ -149,7 +149,7 @@ test("resolveReply: aceitou + ordem possivel -> executa e avisa no chat", () => 
   assert.deepEqual(r.entries.map((e) => e.role), ["assistant", "system"]);
   assert.deepEqual(r.entries[0], { role: "assistant", text: "Pode deixar, chefe!", order: r.order });
   assert.equal(r.entries[1].kind, "order");
-  assert.equal(r.entries[1].text, "Rita vai levar o bloco para o quadrante B (cima, à direita).");
+  assert.equal(r.entries[1].text, "Rita vai levar o bloco para o quadrante B (à direita).");
 });
 
 test("resolveReply: aceitou mas o bloco ja esta no destino -> recusa com o motivo", () => {
