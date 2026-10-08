@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>boss-simulator</title>
+  <meta name="description" content="boss-simulator: o chefe da ordens pelo chat para tres personagens num campo pixel-art" />
+  <link rel="icon" href="data:," />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/style.css" />
+  <script src="/node_modules/phaser/dist/phaser.min.js"></script>
+</head>
+<body>
+  <div id="app">
+    <!-- Canvas do Phaser -->
+    <div id="game"></div>
+
+    <!-- HUD flutuante (mesma estrutura de layout do Agent Town) -->
+    <div class="hud-overlay">
+      <div class="layout-top">
+        <div class="layout-topbar__title">
+          <span class="layout-topbar__logo">boss-simulator</span>
+        </div>
+
+        <div class="layout-topbar__agents" id="agent-pills"></div>
+
+        <div class="layout-topbar__tools" id="tool-buttons"></div>
+      </div>
+
+      <!-- Flyout que cai abaixo dos botoes de ferramentas (canto superior direito) -->
+      <div class="hud-topright-flyout" id="topright-flyout" hidden></div>
+
+      <div class="layout-bottom">
+        <div class="layout-bottombar" id="bottom-bar"></div>
+        <div class="layout-bottom__spacer"></div>
+
+        <div class="hud-chat-dock">
+          <div class="hud-chat-dock__panel" id="chat-panel" hidden></div>
+          <button type="button" class="hud-chat-dock__btn" id="chat-toggle" title="Chat">
+            <img src="/public/ui/icons/icon-chat.png" alt="" />
+            <span class="hud-chat-dock__label">Chat</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tela inicial: status do Ollama e botao "Comecar" (game/loading.js) -->
+  <div class="loading" id="loading">
+    <div class="loading__card" id="loading-card">
+      <div class="loading__title">boss-simulator</div>
+      <div class="loading__subtitle" id="loading-subtitle" role="status" aria-live="polite">Preparando o campo...</div>
+      <div class="loading__ollama" id="loading-ollama"></div>
+      <p class="loading__tip" id="loading-tip"></p>
+      <button type="button" class="pixel-button pixel-button--primary" id="loading-start" hidden>Começar</button>
+    </div>
+  </div>
+
+  <script type="module" src="/game/main.js"></script>
+</body>
+</html>
